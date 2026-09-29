@@ -1,4 +1,8 @@
-FROM node:24.3.0-slim
+# Runtime is pinned to the exact Node major/minor/patch that CI validates
+# (see .github/workflows/ci.yml, which runs the test suite on Node 22). Building
+# the image on a different major than the one the suite runs against means the
+# shipped artifact is never the artifact that was tested.
+FROM node:22.22.0-slim
 
 # psql is needed for dumping and restoring the initial effects cache.
 # ca-certificates: the -slim base ships no CA bundle, so the native hypersync-client
@@ -16,6 +20,8 @@ WORKDIR /envio-indexer
 COPY ./package.json ./package.json
 COPY ./pnpm-lock.yaml ./pnpm-lock.yaml
 
+# `--frozen-lockfile` fails the build if the lockfile drifts from package.json,
+# which keeps the image reproducible from the committed lockfile alone.
 RUN pnpm install --frozen-lockfile
 
 COPY ./config.yaml ./config.yaml
@@ -24,5 +30,11 @@ COPY ./schema.graphql ./schema.graphql
 RUN pnpm envio codegen
 
 COPY ./ ./
+
+# Run as an unprivileged user. The `node` image ships a `node` user (uid 1000);
+# the indexer only ever reads its own bundle and writes to its data directory, so
+# root is unnecessary and would turn any RCE in the indexer process into root on
+# the container.
+USER node
 
 CMD pnpm envio start
